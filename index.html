@@ -129,6 +129,10 @@ details ul{padding-left:18px;margin:6px 0 0}
 .dock.many .bidbtn .bl{font-size:16px}
 .bidbtn:disabled{background:var(--curtain2);color:var(--muted);border:2px solid var(--tc)}
 .bidbtn:not(:disabled):active{transform:scale(.98)}
+.dockteam{display:flex;flex-direction:column;gap:6px}
+.skipbtn{display:block;width:100%;text-align:center;padding:8px 12px;border-radius:12px;border:1px solid var(--line);font-size:13px;font-weight:600;color:var(--muted)}
+.skipbtn[aria-pressed=true]{background:var(--curtain2);color:var(--ivory);border-color:var(--gold)}
+.skipbtn:disabled:not([aria-pressed=true]){opacity:.4}
 .team{background:var(--curtain);border-radius:14px;padding:12px 14px;margin-bottom:10px;border-left:7px solid var(--tc)}
 .team-h{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
 .team h3{font-size:17px}
@@ -318,26 +322,6 @@ Bhumi Pednekar|HIN|Performer|76
 Janhvi Kapoor|HIN|Romantic|72
 Sara Ali Khan|HIN|Romantic|72
 Yami Gautam|HIN|Romantic|72`,
-hero_en:`Tom Hanks|ENG|Actor|96
-Leonardo DiCaprio|ENG|Actor|95
-Tom Cruise|ENG|Action|94
-Denzel Washington|ENG|Actor|94
-Robert Downey Jr|ENG|Mass|93
-Brad Pitt|ENG|Versatile|92
-Keanu Reeves|ENG|Action|90
-Will Smith|ENG|Mass|89
-Dwayne Johnson|ENG|Action|88
-Johnny Depp|ENG|Versatile|87`,
-heroine_en:`Meryl Streep|ENG|Performer|97
-Scarlett Johansson|ENG|Versatile|92
-Jennifer Lawrence|ENG|Performer|91
-Angelina Jolie|ENG|Action|91
-Julia Roberts|ENG|Romantic|90
-Nicole Kidman|ENG|Performer|90
-Margot Robbie|ENG|Versatile|89
-Sandra Bullock|ENG|Romantic|88
-Anne Hathaway|ENG|Versatile|87
-Emma Watson|ENG|Romantic|84`
 };
 const TEAMS=[
  {name:'Chennai Clapboards',color:'#ffc233',home:'TAM'},
@@ -380,13 +364,18 @@ for(const k of Object.keys(RAW)){
 }
 
 /* ---------- State ---------- */
-const POOLNAME={hero:'Hero auction',heroine:'Heroine auction',hero_en:'English hero auction',heroine_en:'English heroine auction'};
-const poolKey=c=>c.lang==='en'?c.mode+'_en':c.mode;
-const maxCast=c=>Math.max(1,Math.min(10,Math.floor(DATA[poolKey(c)].length/c.teams)));
-function fixCfg(c){c.teams=clamp(c.teams,2,8);c.cast=clamp(c.want||c.cast,1,maxCast(c));c.humans=c.humans.filter(i=>i<c.teams);if(!c.humans.length)c.humans=[0]}
+const POOLNAME={hero:'Hero auction',heroine:'Heroine auction'};
+function fixCfg(c){c.teams=clamp(c.teams,2,8);c.humans=c.humans.filter(i=>i<c.teams);if(!c.humans.length)c.humans=[0]}
+function getClientId(){
+  try{
+    let id=localStorage.getItem('castClientId');
+    if(!id){id='c-'+Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem('castClientId',id)}
+    return id;
+  }catch(e){return 'c-'+Math.random().toString(36).slice(2)}
+}
 const S={screen:'home',role:'local',timer:null,A:null,notice:'',gone:false,
   net:{},conns:{},players:[],claims:[],room:'',lobby:null,me:{id:'host',name:'Player'},wake:null,
-  cfg:{mode:'hero',lang:'in',teams:8,cast:6,want:6,purse:90,speed:'normal',humans:[0]}};
+  cfg:{mode:'hero',teams:8,purse:90,speed:'normal',humans:[0]}};
 
 const mine=t=>S.role==='local'?t.human:t.owner===S.me.id;
 function getStoredName(){try{return localStorage.getItem('castName')||''}catch(e){return ''}}
@@ -417,7 +406,7 @@ function makeCode(){const a='ABCDEFGHJKLMNPQRSTUVWXYZ';let s='';for(let i=0;i<4;
 
 function lobbyMsg(){
   const c=S.cfg;
-  return {t:'lobby',code:S.room,cfg:{mode:c.mode,lang:c.lang,teams:c.teams,cast:c.cast,purse:c.purse,speed:c.speed},
+  return {t:'lobby',code:S.room,cfg:{mode:c.mode,teams:c.teams,purse:c.purse,speed:c.speed},
     players:S.players.map(p=>({id:p.id,name:p.name})),claims:S.claims.slice(0,TEAMS.length)};
 }
 function pushLobby(){
@@ -466,10 +455,25 @@ function onClientMsg(conn,m){
   if(m.t==='hello'){
     if(S.players.some(p=>p.id===pid)) return;
     if(S.players.length>=16){sendTo(conn,{t:'bye',why:'The room is full.'});return}
+    const cid=String(m.cid||'').slice(0,64);
+    /* Reconnecting mid-auction: if this device previously owned a team that's now
+       marked as left, hand that team straight back instead of leaving them a spectator. */
+    if(S.A&&cid){
+      const t=S.A.teams.find(x=>x.left&&x.cid===cid);
+      if(t){
+        t.owner=pid;t.human=true;t.left=false;
+        S.players.push({id:pid,name:t.pname||'Player',cid});
+        S.conns[pid]=conn;
+        sendTo(conn,{t:'state',snap:snapshot()});
+        renderTeams();renderDock();
+        broadcast();
+        return;
+      }
+    }
     let nm=String(m.name||'Player').replace(/\s+/g,' ').trim().slice(0,14)||'Player';
     const base=nm;let k=2;
     while(S.players.some(p=>p.name===nm)) nm=base.slice(0,12)+' '+(k++);
-    S.players.push({id:pid,name:nm});
+    S.players.push({id:pid,name:nm,cid});
     S.conns[pid]=conn;
     if(S.screen==='lobby') pushLobby();
     else if(S.A) sendTo(conn,{t:'state',snap:snapshot()});
@@ -482,6 +486,10 @@ function onClientMsg(conn,m){
     const t=S.A&&S.A.teams.find(x=>x.owner===pid);
     const ok=t&&placeBid(t.id,+m.amt);
     if(!ok) sendTo(conn,{t:'state',snap:S.A?snapshot():null});
+  }
+  else if(m.t==='skip'){
+    const t=S.A&&S.A.teams.find(x=>x.owner===pid);
+    if(t) trySkip(t.id);
   }
 }
 function onClientGone(conn){
@@ -499,6 +507,11 @@ function onClientGone(conn){
     if(L&&A.phase==='bidding'){
       L.botMax[t.id]=botValue(t,L.p);
       L.think[t.id]=(L.leader!==t.id&&L.botMax[t.id]>=L.next&&canBid(t,L.next))?now+rand(700,2000):Infinity;
+      L.skip.delete(t.id);
+      if(L.leader===null){
+        const elig=A.teams.filter(x=>x.human&&!x.left&&active(x)&&L.leader!==x.id);
+        if(elig.length&&elig.every(x=>L.skip.has(x.id))){closeLot();return}
+      }
     }
   }
   if(S.screen==='auction'){renderTeams();renderDock()}
@@ -535,7 +548,7 @@ function joinRoom(code,name){
     conn.on('open',()=>{
       if(done) return;
       done=true;clearTimeout(to);
-      sendTo(conn,{t:'hello',name});
+      sendTo(conn,{t:'hello',name,cid:getClientId()});
       requestWake();
     });
     conn.on('data',onHostMsg);
@@ -576,11 +589,8 @@ function stepper(k,label,val,min,max,hint){
     </div>${hint?`<p class="hint">${hint}</p>`:''}</div>`;
 }
 function cfgControls(c){
-  const pool=DATA[poolKey(c)].length,mc=maxCast(c);
   return `
-  <div class="field"><h3>Cinema</h3>${seg('lang',['in','en'],c.lang,v=>v==='in'?'Indian cinema':'English top 10')}</div>
   ${stepper('teams','Teams in the room',c.teams,2,8,'Pick anything from 2 to 8 teams.')}
-  ${stepper('cast','Stars each team signs',c.cast,1,mc,`This pool has ${pool} stars, so with ${c.teams} teams each can sign up to ${mc}.`)}
   <div class="field"><h3>Purse per team</h3>${seg('purse',[70,90,110],c.purse,v=>'₹'+v+' Cr')}</div>
   <div class="field"><h3>Bidding speed</h3>${seg('speed',Object.keys(SPEEDS),c.speed,k=>SPEEDS[k].label)}</div>`;
 }
@@ -588,10 +598,10 @@ function howItWorks(){
   return `<details><summary>How it works</summary>
     <ul>
       <li>Each lot opens at a base price. Bid, and the clock resets. When it hits zero, the highest bidder signs the star.</li>
-      <li>Keep enough purse to fill your cast: every empty slot needs at least ₹0.5 Cr in reserve.</li>
+      <li>Cast size is unlimited: sign as many stars as your purse allows. You're out once your purse drops below the minimum bid.</li>
+      <li>Can't be bothered with a lot? Tap Skip. Once every human team still able to bid has skipped, it's marked unsold and the auction moves straight to the next lot.</li>
       <li>Final score is the total rating of your cast, plus 4 for every extra type of star, plus 2 for each star from your home industry, plus 0.2 for every crore left unspent.</li>
       <li>Teams nobody takes are played by bots.</li>
-      <li>You choose how many teams play and how many stars each signs. The English pool has only 10 stars, so use fewer teams or a smaller cast there.</li>
     </ul></details>
   <p class="fine">A fan-made game for fun. Ratings, types and prices are made up and not official. Not affiliated with any actor, studio or film industry body.</p>`;
 }
@@ -633,8 +643,8 @@ function renderSetup(){
   S.screen='setup';
   document.body.dataset.mode=c.mode;
   const humans=c.humans.filter(i=>i<c.teams);
-  const cnt={hero:DATA[poolKey({mode:'hero',lang:c.lang})].length,heroine:DATA[poolKey({mode:'heroine',lang:c.lang})].length};
-  const indsTxt=c.lang==='en'?'The top 10 English language stars':'Tamil, Telugu, Malayalam, Kannada and Hindi cinema';
+  const cnt={hero:DATA.hero.length,heroine:DATA.heroine.length};
+  const indsTxt='Tamil, Telugu, Malayalam, Kannada and Hindi cinema';
   app.innerHTML=`
   <button type="button" class="back" data-act="home">Back</button>
   <h1 class="brand" style="font-size:clamp(38px,11vw,58px);margin-top:14px">One screen</h1>
@@ -680,7 +690,7 @@ function renderLobby(){
   document.body.dataset.mode=cfg.mode;
   const nameOf=id=>{const p=L.players.find(p=>p.id===id);return p?p.name:'Player'};
   const anyClaim=L.claims.slice(0,cfg.teams).some(Boolean);
-  const modeLabel=POOLNAME[poolKey(cfg)];
+  const modeLabel=POOLNAME[cfg.mode];
   app.innerHTML=`
   <button type="button" class="back" data-act="leave">${isHost?'Close room':'Leave room'}</button>
   <div class="roombox">
@@ -695,7 +705,7 @@ function renderLobby(){
   <div class="field"><h3>Auction settings</h3>
     ${isHost?`${seg('mode',['hero','heroine'],cfg.mode,v=>v==='hero'?'Hero auction':'Heroine auction')}
       ${cfgControls(cfg)}`
-      :`<p class="sumline">${modeLabel}, ${cfg.teams} teams, cast of ${cfg.cast}, ₹${cfg.purse} Cr purse, ${SPEEDS[cfg.speed].label.toLowerCase()} speed. The host can change these.</p>`}</div>
+      :`<p class="sumline">${modeLabel}, ${cfg.teams} teams, ₹${cfg.purse} Cr purse, ${SPEEDS[cfg.speed].label.toLowerCase()} speed. The host can change these.</p>`}</div>
   <div class="field"><h3>Pick your team</h3>
     ${TEAMS.slice(0,cfg.teams).map((t,i)=>{
       const o=L.claims[i];
@@ -729,19 +739,19 @@ function startAuction(){
   const c=S.cfg,room=S.role==='host';
   fixCfg(c);
   const teams=TEAMS.slice(0,c.teams).map((t,i)=>{
-    let human,owner=null,pname='';
-    if(room){owner=S.claims[i]||null;human=!!owner;const pl=S.players.find(p=>p.id===owner);pname=pl?pl.name:''}
+    let human,owner=null,pname='',cid=null;
+    if(room){owner=S.claims[i]||null;human=!!owner;const pl=S.players.find(p=>p.id===owner);pname=pl?pl.name:'';cid=pl?pl.cid:null}
     else human=c.humans.filter(x=>x<c.teams).includes(i);
-    return {id:i,name:t.name,color:t.color,home:t.home,human,owner,pname,left:false,
+    return {id:i,name:t.name,color:t.color,home:t.home,human,owner,pname,cid,left:false,
       purse:c.purse,cast:[],aggr:0.85+Math.random()*0.4};
   });
   if(!teams.some(t=>t.human)) return;
-  const pk=poolKey(c);
+  const pk=c.mode;
   const sorted=DATA[pk].slice().sort((a,b)=>b.r-a.r);
   const mq=sorted.length>20?8:3;
   const queue=shuffle(sorted.slice(0,mq)).concat(shuffle(sorted.slice(mq)));
   const sp=SPEEDS[c.speed];
-  S.A={mode:c.mode,pool:pk,mq,teams,queue,idx:-1,cast:c.cast,round:1,unsold:[],results:[],lot:null,phase:'idle',
+  S.A={mode:c.mode,pool:pk,mq,teams,queue,idx:-1,round:1,unsold:[],results:[],lot:null,phase:'idle',
     deadline:0,total:1000,rem:0,t0:sp.t0*1000,t1:sp.t1*1000,hammerT:null,tab:'live',lastStatus:''};
   S.screen='auction';
   document.body.dataset.mode=c.mode;
@@ -754,40 +764,40 @@ function startAuction(){
 }
 
 /* ---------- Auction logic (local and host) ---------- */
-function slotsLeft(t){return S.A.cast-t.cast.length}
-function maxBid(t){const s=slotsLeft(t);return s<=0?-Infinity:t.purse-0.5*(s-1)}
-function canBid(t,amt){return slotsLeft(t)>0&&amt<=maxBid(t)+1e-9}
+function active(t){return t.purse>=0.5-1e-9}
+function maxBid(t){return active(t)?t.purse:-Infinity}
+function canBid(t,amt){return active(t)&&amt<=maxBid(t)+1e-9}
 function nextText(A){
   const nx=A.queue[A.idx+1];
   return nx?'Up next: '+nx.n:(A.round===1&&A.unsold.length?'Unsold stars return for a second round':'Last lot');
 }
 
 function botValue(t,p){
-  const A=S.A,slots=slotsLeft(t);
-  if(slots<=0) return 0;
+  const A=S.A;
+  if(!active(t)) return 0;
   let v=worth(p.r)*t.aggr*(0.8+Math.random()*0.4);
   if(p.ind===t.home) v*=1.18;
   const same=t.cast.filter(c=>c.p.type===p.type).length;
   if(t.cast.length>0&&same===0) v*=1.08;
   if(same>=2) v*=0.82;
   const remain=A.queue.length-A.idx-1;
-  if(remain<=slots*2+2) v*=1.35;
-  return Math.min(v,(t.purse/slots)*2);
+  if(remain<=3) v*=1.4;
+  return Math.min(v,t.purse*0.45+0.5);
 }
 
 function nextLot(){
   const A=S.A; if(!A||S.screen!=='auction') return;
-  if(A.teams.every(t=>slotsLeft(t)<=0)) return finish();
+  if(A.teams.every(t=>!active(t))) return finish();
   A.idx++;
   if(A.idx>=A.queue.length){
-    const open=A.teams.some(t=>slotsLeft(t)>0);
+    const open=A.teams.some(t=>active(t));
     if(A.round===1&&A.unsold.length&&open){
       A.round=2;A.queue=shuffle(A.unsold);A.unsold=[];A.idx=0;
     } else return finish();
   }
   const p=A.queue[A.idx];
   const base=A.round===2?0.5:baseOf(p.r);
-  const L={p,base,bid:null,leader:null,next:base,bids:[],botMax:{},think:{},marquee:A.round===1&&A.idx<A.mq};
+  const L={p,base,bid:null,leader:null,next:base,bids:[],botMax:{},think:{},skip:new Set(),marquee:A.round===1&&A.idx<A.mq};
   A.lot=L;
   const now=performance.now();
   for(const t of A.teams){
@@ -810,6 +820,7 @@ function placeBid(tid,expect){
   const amt=L.next;
   L.bid=amt;L.leader=tid;L.bids.unshift({tid,amt});
   L.next=r2(amt+inc(amt));
+  L.skip.delete(tid);
   const now=performance.now();
   A.deadline=now+A.t1;A.total=A.t1;
   for(const b of A.teams){
@@ -821,13 +832,29 @@ function placeBid(tid,expect){
   return true;
 }
 
+function trySkip(tid){
+  const A=S.A;
+  if(!A||A.phase!=='bidding') return false;
+  const L=A.lot,t=A.teams[tid];
+  if(!t||!t.human||L.leader===tid) return false;
+  if(L.skip.has(tid)) return false;
+  L.skip.add(tid);
+  renderDock();
+  broadcast();
+  if(L.leader===null){
+    const elig=A.teams.filter(x=>x.human&&!x.left&&active(x)&&L.leader!==x.id);
+    if(elig.length&&elig.every(x=>L.skip.has(x.id))) closeLot();
+  }
+  return true;
+}
+
 function tick(){
   const A=S.A;if(!A||S.screen!=='auction'||A.phase!=='bidding') return;
   const now=performance.now();
   if(now>=A.deadline) return closeLot();
   const L=A.lot;
   for(const t of A.teams){
-    if(t.human||t.id===L.leader||slotsLeft(t)<=0) continue;
+    if(t.human||t.id===L.leader||!active(t)) continue;
     if(now<(L.think[t.id]===undefined?Infinity:L.think[t.id])) continue;
     const willing=L.botMax[t.id]>=L.next&&canBid(t,L.next);
     if(willing&&Math.random()<0.85){placeBid(t.id);return}
@@ -908,19 +935,19 @@ function backToLobby(){
 function snapshot(){
   const A=S.A,L=A.lot,now=performance.now();
   const rem=A.phase==='bidding'?Math.max(0,A.deadline-now):A.phase==='paused'?A.rem:0;
-  return {mode:A.mode,pool:A.pool,cast:A.cast,round:A.round,idx:A.idx,qlen:A.queue.length,nextText:nextText(A),
+  return {mode:A.mode,pool:A.pool,round:A.round,idx:A.idx,qlen:A.queue.length,nextText:nextText(A),
     phase:A.phase,rem:Math.round(rem),total:A.total,
     teams:A.teams.map(t=>({id:t.id,name:t.name,color:t.color,home:t.home,human:t.human,owner:t.owner,pname:t.pname,
       left:!!t.left,purse:t.purse,cast:t.cast.map(c=>({pi:c.p.pi,price:c.price}))})),
-    lot:L?{pi:L.p.pi,base:L.base,bid:L.bid,leader:L.leader,next:L.next,marquee:L.marquee,bids:L.bids.slice(0,4)}:null,
+    lot:L?{pi:L.p.pi,base:L.base,bid:L.bid,leader:L.leader,next:L.next,marquee:L.marquee,bids:L.bids.slice(0,4),skip:Array.from(L.skip)}:null,
     results:A.results.map(r=>({pi:r.p.pi,team:r.team,price:r.price}))};
 }
 function applySnapshot(s){
   const pool=DATA[s.pool||s.mode],prev=S.A;
-  const A={mode:s.mode,pool:s.pool||s.mode,cast:s.cast,round:s.round,idx:s.idx,qlen:s.qlen,nextText:s.nextText,phase:s.phase,
+  const A={mode:s.mode,pool:s.pool||s.mode,round:s.round,idx:s.idx,qlen:s.qlen,nextText:s.nextText,phase:s.phase,
     rem:s.rem,total:s.total||1000,deadline:performance.now()+s.rem,
     teams:s.teams.map(t=>Object.assign({},t,{cast:t.cast.map(c=>({p:pool[c.pi],price:c.price}))})),
-    lot:s.lot?{p:pool[s.lot.pi],base:s.lot.base,bid:s.lot.bid,leader:s.lot.leader,next:s.lot.next,marquee:s.lot.marquee,bids:s.lot.bids}:null,
+    lot:s.lot?{p:pool[s.lot.pi],base:s.lot.base,bid:s.lot.bid,leader:s.lot.leader,next:s.lot.next,marquee:s.lot.marquee,bids:s.lot.bids,skip:new Set(s.lot.skip||[])}:null,
     results:s.results.map(r=>({p:pool[r.pi],team:r.team,price:r.price})),
     lastStatus:prev?prev.lastStatus:'',tab:prev?prev.tab:'live'};
   let newLot=!prev||prev.idx!==A.idx||prev.round!==A.round;
@@ -1074,13 +1101,18 @@ function renderDock(){
     let label,dis=false;
     if(A.phase==='paused'){dis=true;label='Paused'}
     else if(A.phase!=='bidding'){dis=true;label='Hammer down'}
-    else if(slotsLeft(t)<=0){dis=true;label='Cast full'}
+    else if(!active(t)){dis=true;label='Out of funds'}
     else if(L.leader===t.id){dis=true;label='Leading at '+cr(L.bid)}
     else if(!canBid(t,L.next)){dis=true;label='Over your limit'}
     else label='Bid '+cr(L.next);
-    return `<button type="button" class="bidbtn" data-act="bid" data-t="${t.id}" style="--tc:${t.color}" ${dis?'disabled':''}>
-      <span class="bn">${esc(t.name)}</span><span class="bl num">${label}</span>
-      <span class="bp num">Purse ${cr(t.purse)}, ${slotsLeft(t)} to sign</span></button>`}).join('');
+    const skipped=L.skip&&L.skip.has(t.id);
+    const skipDis=A.phase!=='bidding'||L.leader===t.id||skipped;
+    return `<div class="dockteam">
+      <button type="button" class="bidbtn" data-act="bid" data-t="${t.id}" style="--tc:${t.color}" ${dis?'disabled':''}>
+        <span class="bn">${esc(t.name)}</span><span class="bl num">${label}</span>
+        <span class="bp num">Purse ${cr(t.purse)}</span></button>
+      <button type="button" class="skipbtn" data-act="skip" data-t="${t.id}" aria-pressed="${!!skipped}" ${skipDis?'disabled':''}>${skipped?'Skipped, waiting for others…':'Skip this star'}</button>
+    </div>`}).join('');
 }
 
 function ownerLabel(t){
@@ -1093,7 +1125,7 @@ function renderTeams(){
   el.innerHTML=A.teams.map(t=>`
     <article class="team" style="--tc:${t.color}">
       <div class="team-h"><div><h3>${esc(t.name)}</h3><p>${ownerLabel(t)}, home crowd ${IND[t.home]}</p></div>
-        <div class="purse"><b class="num">${cr(t.purse)}</b><span>${t.cast.length} of ${A.cast} signed</span></div></div>
+        <div class="purse"><b class="num">${cr(t.purse)}</b><span>${t.cast.length} signed</span></div></div>
       <ul class="squad">${t.cast.map(c=>`<li><span>${esc(c.p.n)}</span><em class="num">${cr(c.price)}</em></li>`).join('')||'<li class="empty">No stars signed yet</li>'}</ul>
     </article>`).join('');
 }
@@ -1144,7 +1176,7 @@ function renderEnd(){
   ${ranked.map((x,i)=>`
   <details class="rank" style="--tc:${x.t.color}" ${i===0?'open':''}>
     <summary><span class="pos">${i+1}</span>
-      <span class="rn"><b>${esc(x.t.name)}</b><span>${S.role==='local'?(x.t.human?'Human':'Bot'):ownerLabel(x.t)}, ${x.t.cast.length} of ${A.cast} signed</span></span>
+      <span class="rn"><b>${esc(x.t.name)}</b><span>${S.role==='local'?(x.t.human?'Human':'Bot'):ownerLabel(x.t)}, ${x.t.cast.length} signed</span></span>
       <span class="tot num">${x.s.total}</span></summary>
     <div class="body">
       <div class="break num">
@@ -1158,7 +1190,17 @@ function renderEnd(){
   </details>`).join('')}
   ${foot}
   <button type="button" class="ghost" data-act="copy" id="copybtn">Copy results</button>
+  <button type="button" class="ghost" data-act="download">Download results</button>
   <div id="copyarea"></div>`;
+}
+function downloadResults(){
+  const txt=resultsText();
+  const blob=new Blob([txt],{type:'text/plain'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='cast-auction-results.txt';
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 async function copyResults(){
   const txt=resultsText();
@@ -1182,8 +1224,7 @@ const ACT={
   },
   setup(){S.role='local';renderSetup()},
   mode(d){S.cfg.mode=d.v;fixCfg(S.cfg);cfgChanged()},
-  lang(d){S.cfg.lang=d.v;fixCfg(S.cfg);cfgChanged()},
-  step(d){const c=S.cfg;if(d.k==='cast')c.want=clamp(c.cast+ +d.d,1,maxCast(c));else c.teams+= +d.d;fixCfg(c);cfgChanged()},
+  step(d){const c=S.cfg;c.teams+= +d.d;fixCfg(c);cfgChanged()},
   purse(d){S.cfg.purse=+d.v;cfgChanged()},
   speed(d){S.cfg.speed=d.v;cfgChanged()},
   who(d){
@@ -1203,12 +1244,19 @@ const ACT={
       document.querySelectorAll('.bidbtn').forEach(b=>{b.disabled=true});
     } else placeBid(+d.t);
   },
+  skip(d){
+    if(S.role==='client'){
+      const L=S.A&&S.A.lot;if(!L||S.A.phase!=='bidding') return;
+      sendHost({t:'skip'});
+    } else trySkip(+d.t);
+  },
   pause(){togglePause()},
   tab(d){showTab(d.v)},
   leave(){leaveAll()},
   lobby(){backToLobby()},
   again(){S.A=null;renderSetup();window.scrollTo(0,0)},
-  copy(){copyResults()}
+  copy(){copyResults()},
+  download(){downloadResults()}
 };
 document.addEventListener('click',e=>{
   const t=e.target.closest('[data-act]');if(!t) return;
