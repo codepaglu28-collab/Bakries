@@ -179,6 +179,10 @@ textarea.copybox{width:100%;height:150px;margin-top:10px;background:var(--curtai
 .waiting{margin-top:22px;padding:16px;text-align:center;border-radius:14px;background:var(--curtain);color:var(--muted)}
 .watch{text-align:center;color:var(--muted);padding:10px 0;font-size:15px}
 .sumline{color:var(--muted);font-size:15px}
+.stepper{display:flex;align-items:center;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--curtain)}
+.stepper button{flex:none;width:68px;height:54px;font-size:28px;font-weight:700;background:var(--curtain2);line-height:1}
+.stepper button:disabled{opacity:.3}
+.stepper output{flex:1;text-align:center;font-family:var(--display);font-size:30px}
 </style>
 </head>
 <body data-mode="hero">
@@ -198,7 +202,7 @@ textarea.copybox{width:100%;height:150px;margin-top:10px;background:var(--curtai
 
 "use strict";
 /* ---------- Data ---------- */
-const IND={TAM:'Tamil',TEL:'Telugu',MAL:'Malayalam',KAN:'Kannada',HIN:'Hindi'};
+const IND={TAM:'Tamil',TEL:'Telugu',MAL:'Malayalam',KAN:'Kannada',HIN:'Hindi',ENG:'English'};
 const RAW={
 hero:`Rajinikanth|TAM|Mass|96
 Kamal Haasan|TAM|Versatile|95
@@ -313,7 +317,27 @@ Shraddha Kapoor|HIN|Dancer|78
 Bhumi Pednekar|HIN|Performer|76
 Janhvi Kapoor|HIN|Romantic|72
 Sara Ali Khan|HIN|Romantic|72
-Yami Gautam|HIN|Romantic|72`
+Yami Gautam|HIN|Romantic|72`,
+hero_en:`Tom Hanks|ENG|Actor|96
+Leonardo DiCaprio|ENG|Actor|95
+Tom Cruise|ENG|Action|94
+Denzel Washington|ENG|Actor|94
+Robert Downey Jr|ENG|Mass|93
+Brad Pitt|ENG|Versatile|92
+Keanu Reeves|ENG|Action|90
+Will Smith|ENG|Mass|89
+Dwayne Johnson|ENG|Action|88
+Johnny Depp|ENG|Versatile|87`,
+heroine_en:`Meryl Streep|ENG|Performer|97
+Scarlett Johansson|ENG|Versatile|92
+Jennifer Lawrence|ENG|Performer|91
+Angelina Jolie|ENG|Action|91
+Julia Roberts|ENG|Romantic|90
+Nicole Kidman|ENG|Performer|90
+Margot Robbie|ENG|Versatile|89
+Sandra Bullock|ENG|Romantic|88
+Anne Hathaway|ENG|Versatile|87
+Emma Watson|ENG|Romantic|84`
 };
 const TEAMS=[
  {name:'Chennai Clapboards',color:'#ffc233',home:'TAM'},
@@ -356,9 +380,13 @@ for(const k of Object.keys(RAW)){
 }
 
 /* ---------- State ---------- */
+const POOLNAME={hero:'Hero auction',heroine:'Heroine auction',hero_en:'English hero auction',heroine_en:'English heroine auction'};
+const poolKey=c=>c.lang==='en'?c.mode+'_en':c.mode;
+const maxCast=c=>Math.max(1,Math.min(10,Math.floor(DATA[poolKey(c)].length/c.teams)));
+function fixCfg(c){c.teams=clamp(c.teams,2,8);c.cast=clamp(c.want||c.cast,1,maxCast(c));c.humans=c.humans.filter(i=>i<c.teams);if(!c.humans.length)c.humans=[0]}
 const S={screen:'home',role:'local',timer:null,A:null,notice:'',gone:false,
   net:{},conns:{},players:[],claims:[],room:'',lobby:null,me:{id:'host',name:'Player'},wake:null,
-  cfg:{mode:'hero',teams:8,cast:6,purse:90,speed:'normal',humans:[0]}};
+  cfg:{mode:'hero',lang:'in',teams:8,cast:6,want:6,purse:90,speed:'normal',humans:[0]}};
 
 const mine=t=>S.role==='local'?t.human:t.owner===S.me.id;
 function getStoredName(){try{return localStorage.getItem('castName')||''}catch(e){return ''}}
@@ -389,7 +417,7 @@ function makeCode(){const a='ABCDEFGHJKLMNPQRSTUVWXYZ';let s='';for(let i=0;i<4;
 
 function lobbyMsg(){
   const c=S.cfg;
-  return {t:'lobby',code:S.room,cfg:{mode:c.mode,teams:c.teams,cast:c.cast,purse:c.purse,speed:c.speed},
+  return {t:'lobby',code:S.room,cfg:{mode:c.mode,lang:c.lang,teams:c.teams,cast:c.cast,purse:c.purse,speed:c.speed},
     players:S.players.map(p=>({id:p.id,name:p.name})),claims:S.claims.slice(0,TEAMS.length)};
 }
 function pushLobby(){
@@ -538,10 +566,21 @@ function onHostGone(why){
 function seg(act,opts,cur,label){
   return `<div class="seg">${opts.map(o=>`<button type="button" data-act="${act}" data-v="${o}" aria-pressed="${o===cur}">${label?label(o):o}</button>`).join('')}</div>`;
 }
-function cfgControls(c,withModeCards){
+function stepper(k,label,val,min,max,hint){
+  const what=k==='teams'?'teams':'stars per team';
+  return `<div class="field"><h3>${label}</h3>
+    <div class="stepper">
+      <button type="button" data-act="step" data-k="${k}" data-d="-1" aria-label="Fewer ${what}" ${val<=min?'disabled':''}>&minus;</button>
+      <output class="num" aria-live="polite">${val}</output>
+      <button type="button" data-act="step" data-k="${k}" data-d="1" aria-label="More ${what}" ${val>=max?'disabled':''}>+</button>
+    </div>${hint?`<p class="hint">${hint}</p>`:''}</div>`;
+}
+function cfgControls(c){
+  const pool=DATA[poolKey(c)].length,mc=maxCast(c);
   return `
-  <div class="field"><h3>Teams in the room</h3>${seg('teams',[4,6,8],c.teams)}</div>
-  <div class="field"><h3>Cast size (stars each team signs)</h3>${seg('cast',[4,5,6],c.cast)}</div>
+  <div class="field"><h3>Cinema</h3>${seg('lang',['in','en'],c.lang,v=>v==='in'?'Indian cinema':'English top 10')}</div>
+  ${stepper('teams','Teams in the room',c.teams,2,8,'Pick anything from 2 to 8 teams.')}
+  ${stepper('cast','Stars each team signs',c.cast,1,mc,`This pool has ${pool} stars, so with ${c.teams} teams each can sign up to ${mc}.`)}
   <div class="field"><h3>Purse per team</h3>${seg('purse',[70,90,110],c.purse,v=>'₹'+v+' Cr')}</div>
   <div class="field"><h3>Bidding speed</h3>${seg('speed',Object.keys(SPEEDS),c.speed,k=>SPEEDS[k].label)}</div>`;
 }
@@ -552,6 +591,7 @@ function howItWorks(){
       <li>Keep enough purse to fill your cast: every empty slot needs at least ₹0.5 Cr in reserve.</li>
       <li>Final score is the total rating of your cast, plus 4 for every extra type of star, plus 2 for each star from your home industry, plus 0.2 for every crore left unspent.</li>
       <li>Teams nobody takes are played by bots.</li>
+      <li>You choose how many teams play and how many stars each signs. The English pool has only 10 stars, so use fewer teams or a smaller cast there.</li>
     </ul></details>
   <p class="fine">A fan-made game for fun. Ratings, types and prices are made up and not official. Not affiliated with any actor, studio or film industry body.</p>`;
 }
@@ -593,7 +633,8 @@ function renderSetup(){
   S.screen='setup';
   document.body.dataset.mode=c.mode;
   const humans=c.humans.filter(i=>i<c.teams);
-  const cnt={hero:DATA.hero.length,heroine:DATA.heroine.length};
+  const cnt={hero:DATA[poolKey({mode:'hero',lang:c.lang})].length,heroine:DATA[poolKey({mode:'heroine',lang:c.lang})].length};
+  const indsTxt=c.lang==='en'?'The top 10 English language stars':'Tamil, Telugu, Malayalam, Kannada and Hindi cinema';
   app.innerHTML=`
   <button type="button" class="back" data-act="home">Back</button>
   <h1 class="brand" style="font-size:clamp(38px,11vw,58px);margin-top:14px">One screen</h1>
@@ -601,11 +642,11 @@ function renderSetup(){
   <div class="modes">
     <button type="button" class="mode hero" data-act="mode" data-v="hero" aria-pressed="${c.mode==='hero'}">
       <h2>Hero auction</h2><span class="count">${cnt.hero} heroes</span>
-      <span class="inds">Tamil, Telugu, Malayalam, Kannada and Hindi cinema</span><span class="sel">Selected</span>
+      <span class="inds">${indsTxt}</span><span class="sel">Selected</span>
     </button>
     <button type="button" class="mode heroine" data-act="mode" data-v="heroine" aria-pressed="${c.mode==='heroine'}">
       <h2>Heroine auction</h2><span class="count">${cnt.heroine} heroines</span>
-      <span class="inds">Tamil, Telugu, Malayalam, Kannada and Hindi cinema</span><span class="sel">Selected</span>
+      <span class="inds">${indsTxt}</span><span class="sel">Selected</span>
     </button>
   </div>
   ${cfgControls(c)}
@@ -634,11 +675,12 @@ function cfgChanged(){
 
 /* ---------- Lobby ---------- */
 function renderLobby(){
+  const y=window.scrollY;
   const L=S.lobby,cfg=L.cfg,isHost=S.role==='host';
   document.body.dataset.mode=cfg.mode;
   const nameOf=id=>{const p=L.players.find(p=>p.id===id);return p?p.name:'Player'};
   const anyClaim=L.claims.slice(0,cfg.teams).some(Boolean);
-  const modeLabel=cfg.mode==='hero'?'Hero auction':'Heroine auction';
+  const modeLabel=POOLNAME[poolKey(cfg)];
   app.innerHTML=`
   <button type="button" class="back" data-act="leave">${isHost?'Close room':'Leave room'}</button>
   <div class="roombox">
@@ -661,10 +703,12 @@ function renderLobby(){
       if(o===S.me.id) right=`<button type="button" class="pick mine" style="--tc:${t.color}" data-act="claim" data-i="${i}" data-v="release">Yours, tap to release</button>`;
       else if(o) right=`<span class="owner" style="--tc:${t.color}">${esc(nameOf(o))}</span>`;
       else right=`<button type="button" class="pick" style="--tc:${t.color}" data-act="claim" data-i="${i}" data-v="take">Take team</button>`;
-      return `<div class="trow" style="--tc:${t.color}"><div class="tn"><b>${esc(t.name)}</b><span>Home crowd: ${IND[t.home]}${o?'':', a bot if nobody takes it'}</span></div>${right}</div>`}).join('')}
+      return `<div class="trow" style="--tc:${t.color}"><div class="tn"><b>${esc(t.name)}</b><span>Home crowd: ${IND[t.home]}</span></div>${right}</div>`}).join('')}
+    <p class="hint">Teams nobody takes are played by bots.</p>
   </div>
   ${isHost?`<button type="button" class="go" data-act="startroom" ${anyClaim?'':'disabled'}>${anyClaim?'Start the auction':'Someone must take a team'}</button>`
           :`<p class="waiting" role="status">Waiting for the host to start</p>`}`;
+  window.scrollTo(0,y);
 }
 function claimAct(d){
   const i=+d.i,val=d.v==='release'?null:i;
@@ -683,6 +727,7 @@ async function copyInvite(){
 /* ---------- Auction setup ---------- */
 function startAuction(){
   const c=S.cfg,room=S.role==='host';
+  fixCfg(c);
   const teams=TEAMS.slice(0,c.teams).map((t,i)=>{
     let human,owner=null,pname='';
     if(room){owner=S.claims[i]||null;human=!!owner;const pl=S.players.find(p=>p.id===owner);pname=pl?pl.name:''}
@@ -691,10 +736,12 @@ function startAuction(){
       purse:c.purse,cast:[],aggr:0.85+Math.random()*0.4};
   });
   if(!teams.some(t=>t.human)) return;
-  const sorted=DATA[c.mode].slice().sort((a,b)=>b.r-a.r);
-  const queue=shuffle(sorted.slice(0,8)).concat(shuffle(sorted.slice(8)));
+  const pk=poolKey(c);
+  const sorted=DATA[pk].slice().sort((a,b)=>b.r-a.r);
+  const mq=sorted.length>20?8:3;
+  const queue=shuffle(sorted.slice(0,mq)).concat(shuffle(sorted.slice(mq)));
   const sp=SPEEDS[c.speed];
-  S.A={mode:c.mode,teams,queue,idx:-1,cast:c.cast,round:1,unsold:[],results:[],lot:null,phase:'idle',
+  S.A={mode:c.mode,pool:pk,mq,teams,queue,idx:-1,cast:c.cast,round:1,unsold:[],results:[],lot:null,phase:'idle',
     deadline:0,total:1000,rem:0,t0:sp.t0*1000,t1:sp.t1*1000,hammerT:null,tab:'live',lastStatus:''};
   S.screen='auction';
   document.body.dataset.mode=c.mode;
@@ -740,7 +787,7 @@ function nextLot(){
   }
   const p=A.queue[A.idx];
   const base=A.round===2?0.5:baseOf(p.r);
-  const L={p,base,bid:null,leader:null,next:base,bids:[],botMax:{},think:{},marquee:A.round===1&&A.idx<8};
+  const L={p,base,bid:null,leader:null,next:base,bids:[],botMax:{},think:{},marquee:A.round===1&&A.idx<A.mq};
   A.lot=L;
   const now=performance.now();
   for(const t of A.teams){
@@ -861,7 +908,7 @@ function backToLobby(){
 function snapshot(){
   const A=S.A,L=A.lot,now=performance.now();
   const rem=A.phase==='bidding'?Math.max(0,A.deadline-now):A.phase==='paused'?A.rem:0;
-  return {mode:A.mode,cast:A.cast,round:A.round,idx:A.idx,qlen:A.queue.length,nextText:nextText(A),
+  return {mode:A.mode,pool:A.pool,cast:A.cast,round:A.round,idx:A.idx,qlen:A.queue.length,nextText:nextText(A),
     phase:A.phase,rem:Math.round(rem),total:A.total,
     teams:A.teams.map(t=>({id:t.id,name:t.name,color:t.color,home:t.home,human:t.human,owner:t.owner,pname:t.pname,
       left:!!t.left,purse:t.purse,cast:t.cast.map(c=>({pi:c.p.pi,price:c.price}))})),
@@ -869,8 +916,8 @@ function snapshot(){
     results:A.results.map(r=>({pi:r.p.pi,team:r.team,price:r.price}))};
 }
 function applySnapshot(s){
-  const pool=DATA[s.mode],prev=S.A;
-  const A={mode:s.mode,cast:s.cast,round:s.round,idx:s.idx,qlen:s.qlen,nextText:s.nextText,phase:s.phase,
+  const pool=DATA[s.pool||s.mode],prev=S.A;
+  const A={mode:s.mode,pool:s.pool||s.mode,cast:s.cast,round:s.round,idx:s.idx,qlen:s.qlen,nextText:s.nextText,phase:s.phase,
     rem:s.rem,total:s.total||1000,deadline:performance.now()+s.rem,
     teams:s.teams.map(t=>Object.assign({},t,{cast:t.cast.map(c=>({p:pool[c.pi],price:c.price}))})),
     lot:s.lot?{p:pool[s.lot.pi],base:s.lot.base,bid:s.lot.bid,leader:s.lot.leader,next:s.lot.next,marquee:s.lot.marquee,bids:s.lot.bids}:null,
@@ -904,7 +951,7 @@ function buildAuction(){
   app.innerHTML=`
   <div class="au">
     <div class="au-top">
-      <div><span class="modechip">${A.mode==='hero'?'Hero auction':'Heroine auction'}</span><span id="lotno"></span></div>
+      <div><span class="modechip">${POOLNAME[A.pool]}</span><span id="lotno"></span></div>
       ${client?'<button type="button" class="pausebtn" data-act="leave">Leave</button>'
               :'<button type="button" class="pausebtn" id="pausebtn" data-act="pause">Pause</button>'}
     </div>
@@ -1074,7 +1121,7 @@ function score(t){
 function resultsText(){
   const A=S.A;
   const ranked=A.teams.map(t=>({t,s:score(t)})).sort((a,b)=>b.s.total-a.s.total);
-  return `Cast Auction, ${A.mode==='hero'?'Hero':'Heroine'} round\n`+ranked.map((x,i)=>`${i+1}. ${x.t.name}${x.t.human&&x.t.pname?' ('+x.t.pname+')':''}: ${x.s.total} points (${x.t.cast.map(c=>c.p.n).join(', ')||'no cast'})`).join('\n');
+  return `Cast Auction, ${POOLNAME[A.pool]}\n`+ranked.map((x,i)=>`${i+1}. ${x.t.name}${x.t.human&&x.t.pname?' ('+x.t.pname+')':''}: ${x.s.total} points (${x.t.cast.map(c=>c.p.n).join(', ')||'no cast'})`).join('\n');
 }
 function renderEnd(){
   const A=S.A;
@@ -1103,7 +1150,7 @@ function renderEnd(){
       <div class="break num">
         <span>Cast ratings</span><b>${x.s.base}</b>
         <span>Variety bonus (${x.s.types} types)</span><b>+${x.s.variety}</b>
-        <span>Home crowd bonus (${x.s.homeN} ${IND[x.t.home]} stars)</span><b>+${x.s.home}</b>
+        ${A.pool.endsWith('_en')?'':`<span>Home crowd bonus (${x.s.homeN} ${IND[x.t.home]} stars)</span><b>+${x.s.home}</b>`}
         <span>Unspent purse (${cr(x.t.purse)})</span><b>+${x.s.purse}</b>
       </div>
       <ul class="squad">${x.t.cast.map(c=>`<li><span>${esc(c.p.n)}</span><em class="num">${cr(c.price)}</em></li>`).join('')||'<li class="empty">Nobody signed</li>'}</ul>
@@ -1134,9 +1181,9 @@ const ACT={
     joinRoom(code,name);
   },
   setup(){S.role='local';renderSetup()},
-  mode(d){S.cfg.mode=d.v;cfgChanged()},
-  teams(d){S.cfg.teams=+d.v;S.cfg.humans=S.cfg.humans.filter(i=>i<S.cfg.teams);if(!S.cfg.humans.length)S.cfg.humans=[0];cfgChanged()},
-  cast(d){S.cfg.cast=+d.v;cfgChanged()},
+  mode(d){S.cfg.mode=d.v;fixCfg(S.cfg);cfgChanged()},
+  lang(d){S.cfg.lang=d.v;fixCfg(S.cfg);cfgChanged()},
+  step(d){const c=S.cfg;if(d.k==='cast')c.want=clamp(c.cast+ +d.d,1,maxCast(c));else c.teams+= +d.d;fixCfg(c);cfgChanged()},
   purse(d){S.cfg.purse=+d.v;cfgChanged()},
   speed(d){S.cfg.speed=d.v;cfgChanged()},
   who(d){
