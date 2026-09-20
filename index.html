@@ -65,6 +65,7 @@ summary{cursor:pointer;font-weight:700}
 details p,details li{color:var(--muted);font-size:15px;margin-top:8px}
 details ul{padding-left:18px;margin:6px 0 0}
 .fine{font-size:12.5px;color:var(--muted);margin-top:26px;max-width:52ch}
+body.capturing .no-capture{display:none!important}
 
 /* Auction */
 .au{padding-bottom:190px}
@@ -294,8 +295,11 @@ Manju Warrier|MAL|Performer|90
 Parvathy Thiruvothu|MAL|Performer|89
 Nithya Menen|MAL|Performer|88
 Nazriya Nazim|MAL|Romantic|84
+Kalyani Priyadarshan|MAL|Romantic|80
 Aishwarya Lekshmi|MAL|Performer|78
 Anupama Parameswaran|MAL|Romantic|77
+Anna Ben|MAL|Performer|76
+Mamitha Baiju|MAL|Performer|74
 Mamta Mohandas|MAL|Versatile|72
 Rashmika Mandanna|KAN|Romantic|91
 Shraddha Srinath|KAN|Performer|78
@@ -1197,25 +1201,54 @@ function renderEnd(){
       <div class="break num">
         <span>Cast ratings</span><b>${x.s.base}</b>
         <span>Variety bonus (${x.s.types} types)</span><b>+${x.s.variety}</b>
-        ${A.pool.endsWith('_en')?'':`<span>Home crowd bonus (${x.s.homeN} ${IND[x.t.home]} stars)</span><b>+${x.s.home}</b>`}
+        <span>Home crowd bonus (${x.s.homeN} ${IND[x.t.home]} stars)</span><b>+${x.s.home}</b>
         <span>Unspent purse (${cr(x.t.purse)})</span><b>+${x.s.purse}</b>
       </div>
       <ul class="squad">${x.t.cast.map(c=>`<li><span>${esc(c.p.n)}</span><em class="num">${cr(c.price)}</em></li>`).join('')||'<li class="empty">Nobody signed</li>'}</ul>
     </div>
   </details>`).join('')}
   ${foot}
-  <button type="button" class="ghost" data-act="copy" id="copybtn">Copy results</button>
-  <button type="button" class="ghost" data-act="download">Download results</button>
-  <div id="copyarea"></div>`;
+  <button type="button" class="ghost no-capture" data-act="copy" id="copybtn">Copy results</button>
+  <button type="button" class="ghost no-capture" data-act="download" id="downloadbtn">Download results</button>
+  <div id="copyarea" class="no-capture"></div>`;
 }
-function downloadResults(){
-  const txt=resultsText();
-  const blob=new Blob([txt],{type:'text/plain'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url;a.download='cast-auction-results.txt';
-  document.body.appendChild(a);a.click();a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url),1000);
+function ensureHtml2Canvas(){
+  if(window.html2canvas) return Promise.resolve();
+  if(S._h2c) return S._h2c;
+  S._h2c=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    s.onload=res;
+    s.onerror=()=>{S._h2c=null;rej(new Error('load-failed'))};
+    document.head.appendChild(s);
+  });
+  return S._h2c;
+}
+async function downloadResults(){
+  const btn=$('#downloadbtn');
+  const label=btn?btn.textContent:'';
+  if(btn){btn.textContent='Preparing image…';btn.disabled=true}
+  const closed=[...app.querySelectorAll('details.rank:not([open])')];
+  closed.forEach(d=>d.open=true);
+  document.body.classList.add('capturing');
+  try{
+    await ensureHtml2Canvas();
+    const bg=getComputedStyle(document.body).backgroundColor||'#2a0b15';
+    const canvas=await html2canvas(app,{backgroundColor:bg,scale:Math.min(2,window.devicePixelRatio||2),useCORS:true});
+    const blob=await new Promise(r=>canvas.toBlob(r,'image/png'));
+    if(!blob) throw new Error('no-blob');
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download='cast-auction-results.png';
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+  }catch(e){
+    if(btn) btn.textContent='Could not download, try again';
+  }finally{
+    document.body.classList.remove('capturing');
+    closed.forEach(d=>d.open=false);
+    if(btn){btn.disabled=false;if(btn.textContent==='Preparing image…')btn.textContent=label}
+  }
 }
 async function copyResults(){
   const txt=resultsText();
